@@ -1,0 +1,5 @@
+package_name: bash
+repo_url: https://archive.ubuntu.com/ubuntu/dists/jammy/main/binary-amd64/Packages.gz
+test_mode: false
+ascii_mode: true
+max_depth: 3
