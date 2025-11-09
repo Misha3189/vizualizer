@@ -4,50 +4,69 @@ import requests
 import gzip
 from io import BytesIO
 
-def main():
-    config_file = 'config.yaml'
+def get_direct_dependencies(package_name, repo_url):
+    print(f"[DEBUG] Загружаем: {repo_url}")
     try:
-        with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-        if not isinstance(config, dict):
-            raise ValueError("Конфигурационный файл должен быть в формате словаря YAML.")
-    except FileNotFoundError:
-        print(f"Ошибка: Файл конфигурации '{config_file}' не найден.")
+        response = requests.get(repo_url, timeout=10)
+        print(f"[DEBUG] Скачано: {len(response.content)} байт")
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Ошибка сети: {e}")
         sys.exit(1)
-    except yaml.YAMLError as e:
-        print(f"Ошибка парсинга YAML: {e}")
-        sys.exit(1)
+
+    try:
+        with gzip.GzipFile(fileobj=BytesIO(response.content)) as f:
+            text = f.read().decode('utf-8')
+        print(f"[DEBUG] Распаковано: {len(text)} символов")
     except Exception as e:
-        print(f"Неизвестная ошибка при загрузке конфигурации: {e}")
-        sys.exit(1)
-    required_params = {
-        'package_name': str,
-        'repo_url': str,
-        'test_mode': bool,
-        'ascii_mode': bool,
-        'max_depth': int
-    }
-
-    for param, param_type in required_params.items():
-        if param not in config:
-            print(f"Ошибка: Отсутствует обязательный параметр '{param}' в конфигурации.")
-            sys.exit(1)
-        if not isinstance(config[param], param_type):
-            print(f"Ошибка: Параметр '{param}' должен быть типа {param_type.__name__}, но получен {type(config[param]).__name__}.")
-            sys.exit(1)
-
-    # Дополнительные проверки
-    if config['max_depth'] < 1:
-        print("Ошибка: 'max_depth' должен быть положительным целым числом (>=1).")
-        sys.exit(1)
-    if not config['repo_url']:
-        print("Ошибка: 'repo_url' не может быть пустым.")
+        print(f"Ошибка GZIP: {e}")
         sys.exit(1)
 
-    # Вывод параметров (только для этого этапа)
-    print("Настраиваемые параметры:")
-    for key, value in config.items():
-        print(f"{key}: {value}")
+    packages = {}
+    for block in text.split('\n\n'):
+        if not block.strip(): continue
+        info = {}
+        for line in block.split('\n'):
+            if ':' in line:
+                k, v = line.split(':', 1)
+                info[k.strip()] = v.strip()
+        if 'Package' in info:
+            packages[info['Package']] = info
+
+    if package_name not in packages:
+        print(f"Пакет '{package_name}' не найден!")
+        print(f"Примеры: {list(packages.keys())[:5]}")
+        sys.exit(1)
+
+    deps_str = packages[package_name].get('Depends', '')
+    deps = set()
+    for part in deps_str.split(','):
+        dep = part.strip().split('|')[0].split()[0]
+        if dep and dep != package_name:
+            deps.add(dep)
+
+    return sorted(deps)
+
+def main():
+    try:
+        with open('config.yaml') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Ошибка загрузки config.yaml: {e}")
+        sys.exit(1)
+
+    print("Конфигурация:")
+    for k, v in config.items():
+        print(f"  {k}: {v}")
+
+    if config.get('test_mode', False):
+        print("test_mode включён — сбор данных отключён.")
+        return
+
+    deps = get_direct_dependencies(config['package_name'], config['repo_url'])
+    print("\nПрямые зависимости:")
+    for d in deps:
+        print(f"  - {d}")
 
 if __name__ == "__main__":
     main()
